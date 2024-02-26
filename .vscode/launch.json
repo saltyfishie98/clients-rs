@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'mqtt-sql-forwarder'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=mqtt-sql-forwarder",
+                    "--package=mqtt-sql-forwarder"
+                ],
+                "filter": {
+                    "name": "mqtt-sql-forwarder",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'mqtt-sql-forwarder'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=mqtt-sql-forwarder",
+                    "--package=mqtt-sql-forwarder"
+                ],
+                "filter": {
+                    "name": "mqtt-sql-forwarder",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
