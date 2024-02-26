@@ -1,5 +1,6 @@
 use futures::stream::StreamExt;
 use paho_mqtt::{self as mqtt, MQTT_VERSION_5};
+use serde_json::json;
 use std::{process, time::Duration};
 
 async fn poll_subscription(
@@ -15,13 +16,13 @@ async fn poll_subscription(
 async fn main() -> Result<(), mqtt::Error> {
     env_logger::init();
 
-    let host = "mqtt://localhost:1883";
+    let host = "mqtt://broker.emqx.io:1883";
     println!("Connecting to the MQTT server at '{}'...", host);
 
     let mut client = {
         let create_opts = mqtt::CreateOptionsBuilder::new()
             .server_uri(host)
-            .client_id("rust_async_sub_v5_3")
+            .client_id("saltyfishie_6")
             .finalize();
 
         mqtt::AsyncClient::new(create_opts).unwrap_or_else(|e| {
@@ -32,11 +33,12 @@ async fn main() -> Result<(), mqtt::Error> {
 
     let conn_opts = {
         let lwt = mqtt::Message::new(
-            "test/lwt",
+            "saltyfishie/echo/lwt",
             "[LWT] Async subscriber v5 lost connection",
             mqtt::QOS_1,
         );
         mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
+            .keep_alive_interval(Duration::from_millis(5000))
             .clean_start(false)
             .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 60])
             .will_message(lwt)
@@ -46,7 +48,7 @@ async fn main() -> Result<(), mqtt::Error> {
     let strm = client.get_stream(25);
     client.connect(conn_opts).await?;
 
-    let topic = "test/#";
+    let topic = "saltyfishie";
     client.subscribe(topic, 1).await?;
     println!("Subscribed to topic: {}", topic);
     println!("Waiting for messages...");
@@ -57,6 +59,29 @@ async fn main() -> Result<(), mqtt::Error> {
                 print!("(R) ");
             }
             println!("{}", msg);
+
+            let json = serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap();
+
+            if let serde_json::Value::Object(data) = json {
+                let keys: Vec<String> = data.iter().map(|(k, _)| k.clone()).collect();
+                let values: Vec<serde_json::Value> = data.iter().map(|(_, v)| v.clone()).collect();
+
+                let mut out = json!({
+                    "keys": keys,
+                    "values": values,
+                });
+
+                out.as_object_mut().unwrap().insert(
+                    "timestamp".into(),
+                    serde_json::Value::String(chrono::Utc::now().to_string()),
+                );
+
+                client.publish(mqtt::Message::new(
+                    "saltyfishie/echo",
+                    serde_json::to_string_pretty(&out).unwrap(),
+                    1,
+                ));
+            }
         } else {
             println!("Lost connection. Attempting reconnect.");
             while let Err(err) = client.reconnect().await {
