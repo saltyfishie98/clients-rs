@@ -1,15 +1,21 @@
 use futures::stream::StreamExt;
 use paho_mqtt::{self as mqtt, MQTT_VERSION_5};
-use std::{env, process, time::Duration};
+use std::{process, time::Duration};
+
+async fn poll_subscription(
+    mut strm: mqtt::AsyncReceiver<Option<mqtt::Message>>,
+) -> Option<mqtt::Message> {
+    match strm.next().await {
+        Some(msg_opt) => msg_opt,
+        None => None,
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), mqtt::Error> {
     env_logger::init();
 
-    let host = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "mqtt://localhost:1883".to_string());
-
+    let host = "mqtt://localhost:1883";
     println!("Connecting to the MQTT server at '{}'...", host);
 
     let mut client = {
@@ -32,12 +38,12 @@ async fn main() -> Result<(), mqtt::Error> {
         );
         mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
             .clean_start(false)
-            .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 3600])
+            .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 60])
             .will_message(lwt)
             .finalize()
     };
 
-    let mut strm = client.get_stream(25);
+    let strm = client.get_stream(25);
     client.connect(conn_opts).await?;
 
     let topic = "test/#";
@@ -45,8 +51,8 @@ async fn main() -> Result<(), mqtt::Error> {
     println!("Subscribed to topic: {}", topic);
     println!("Waiting for messages...");
 
-    while let Some(msg_opt) = strm.next().await {
-        if let Some(msg) = msg_opt {
+    loop {
+        if let Some(msg) = poll_subscription(strm.clone()).await {
             if msg.retained() {
                 print!("(R) ");
             }
@@ -55,11 +61,9 @@ async fn main() -> Result<(), mqtt::Error> {
             println!("Lost connection. Attempting reconnect.");
             while let Err(err) = client.reconnect().await {
                 println!("Error reconnecting: {}", err);
-
-                async_std::task::sleep(Duration::from_millis(1000)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
+            println!("Reconnected!");
         }
     }
-
-    Ok(())
 }
