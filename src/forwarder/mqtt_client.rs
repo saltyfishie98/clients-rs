@@ -33,26 +33,16 @@ impl MqttClient {
         }
         log::info!("Connected to '{}'!", self.mqtt_client.server_uri());
 
-        loop {
-            let subscription = self.mqtt_client.subscribe_many_with_options(
-                &self.mqtt_subscriptions.topics,
-                &self.mqtt_subscriptions.qos,
-                &self.mqtt_subscriptions.opts,
-                self.mqtt_subscriptions.props.clone(),
-            );
+        while self.mqtt_client.is_connected() {}
 
-            match subscription.wait_for(Duration::from_secs(1)) {
-                Err(e) => {
-                    log::error!("Subscription error: {}", e);
-                    self.reconnect().await
-                }
-                Ok(res) => {
-                    log::info!("Subscription response: {:?}", res);
-                    log::info!("Subscribed to '{:?}'!", self.mqtt_subscriptions.topics);
-                    break;
-                }
-            }
-        }
+        self.mqtt_client.subscribe_many_with_options(
+            &self.mqtt_subscriptions.topics,
+            &self.mqtt_subscriptions.qos,
+            &self.mqtt_subscriptions.opts,
+            self.mqtt_subscriptions.props.clone(),
+        );
+
+        log::info!("Subscribed to topics: {:?}", self.mqtt_subscriptions.topics);
     }
 
     pub async fn poll(&mut self) -> Option<mqtt::Message> {

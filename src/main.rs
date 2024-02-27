@@ -5,18 +5,16 @@ use paho_mqtt::{self as mqtt, MQTT_VERSION_5};
 use serde_json::json;
 use std::time::Duration;
 
-const HOST: &str = "mqtt://test.mosquitto.org:1883";
-
 #[tokio::main]
 async fn main() -> Result<(), mqtt::Error> {
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Trace)
+        .filter_level(log::LevelFilter::Info)
         .init();
 
     let mut client = MqttClient::new(MqttSetupConfigs {
         mqtt_create_options: {
             mqtt::CreateOptionsBuilder::new()
-                .server_uri(HOST)
+                .server_uri("mqtt://test.mosquitto.org:1883")
                 .client_id("saltyfishie_3")
                 .finalize()
         },
