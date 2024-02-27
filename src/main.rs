@@ -11,15 +11,13 @@ async fn main() -> Result<(), mqtt::Error> {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    let mut client = MqttClient::new(MqttSetupConfigs {
-        mqtt_create_options: {
-            mqtt::CreateOptionsBuilder::new()
-                .server_uri("mqtt://test.mosquitto.org:1883")
-                .client_id("saltyfishie_3")
-                .finalize()
-        },
+    let mut mqtt_client = {
+        let mqtt_create_options = mqtt::CreateOptionsBuilder::new()
+            .server_uri("mqtt://test.mosquitto.org:1883")
+            .client_id("saltyfishie_3")
+            .finalize();
 
-        mqtt_connect_options: {
+        let mqtt_connect_options = {
             let lwt = mqtt::Message::new(
                 "saltyfishie/echo/lwt",
                 "[LWT] Async subscriber v5 lost connection",
@@ -32,16 +30,21 @@ async fn main() -> Result<(), mqtt::Error> {
                 .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 60])
                 .will_message(lwt)
                 .finalize()
-        },
+        };
 
-        subscriptions: MqttSubscriptions::new(None).add("saltyfishie", 1, Default::default()),
-        msg_buffer_limit: 10,
-    })?;
+        let c = MqttClient::new(MqttSetupConfigs {
+            mqtt_create_options,
+            mqtt_connect_options,
+            subscriptions: MqttSubscriptions::new(None).add("saltyfishie", 1, Default::default()),
+            msg_buffer_limit: 10,
+        })?;
 
-    client.connect().await;
+        c.connect().await;
+        c
+    };
 
     loop {
-        if let Some(msg) = client.poll().await {
+        if let Some(msg) = mqtt_client.poll().await {
             if msg.retained() {
                 print!("(R) ");
             }
@@ -64,7 +67,7 @@ async fn main() -> Result<(), mqtt::Error> {
                     "timestamp": chrono::Utc::now().to_string()
                 });
 
-                client.publish(mqtt::Message::new(
+                mqtt_client.publish(mqtt::Message::new(
                     "saltyfishie/echo",
                     serde_json::to_string_pretty(&out).unwrap(),
                     1,

@@ -31,16 +31,26 @@ impl MqttClient {
             log::error!("{}", e);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        log::info!("Connected to '{}'!", self.mqtt_client.server_uri());
+        log::info!("Connected to broker '{}'", self.mqtt_client.server_uri());
 
-        while self.mqtt_client.is_connected() {}
-
-        self.mqtt_client.subscribe_many_with_options(
+        let mut subscription = self.mqtt_client.subscribe_many_with_options(
             &self.mqtt_subscriptions.topics,
             &self.mqtt_subscriptions.qos,
             &self.mqtt_subscriptions.opts,
             self.mqtt_subscriptions.props.clone(),
         );
+
+        while self.mqtt_client.is_connected() {}
+
+        loop {
+            if subscription.try_wait().is_none() {
+                if !self.mqtt_client.is_connected() {
+                    self.reconnect().await;
+                } else {
+                    break;
+                }
+            }
+        }
 
         log::info!("Subscribed to topics: {:?}", self.mqtt_subscriptions.topics);
     }
