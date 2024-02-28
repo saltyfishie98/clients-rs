@@ -1,0 +1,26 @@
+{
+    "mqtt_topics": [
+        {
+            "topic": "saltyfishie",
+            "qos": 1,
+            "options": {
+                "no_local": false,
+                "retain_as_publish": false,
+                "retain_handling": 0
+            }
+        },
+        {
+            "topic": "saltyfishie/#",
+            "qos": 1,
+            "options": {
+                "no_local": false,
+                "retain_as_publish": false,
+                "retain_handling": 0
+            }
+        },
+        {
+            "topic": "saltyfishie/thing",
+            "qos": 1
+        }
+    ]
+}

@@ -20,6 +20,9 @@
                 }
             },
             "args": [],
+            "env": {
+                "DATABASE_URL": "mysql://user:12345678@localhost/mqtt_testing"
+            },
             "cwd": "${workspaceFolder}",
         },
         {
