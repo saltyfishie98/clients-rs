@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 env_logger = "0.11.2"
-paho-mqtt = { features = ["vendored-ssl"], path = "vendor/paho.mqtt.rust" }
+paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust.git", features = ["vendored-ssl"] }
 toml = "0.8"
 serde = "1.0"
 serde_json = "1.0"

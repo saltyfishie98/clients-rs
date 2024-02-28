@@ -8,7 +8,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<(), mqtt::Error> {
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Trace)
         .init();
 
     let mut mqtt_client = {

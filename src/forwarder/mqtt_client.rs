@@ -43,6 +43,7 @@ impl MqttClient {
         while self.mqtt_client.is_connected() {}
 
         loop {
+            // Does not work on paho.mqtt.rust v0.12.3
             if subscription.try_wait().is_none() {
                 if !self.mqtt_client.is_connected() {
                     self.reconnect().await;
@@ -228,13 +229,6 @@ mod test {
                             1,
                         ));
                     }
-                } else {
-                    log::info!("Lost connection. Attempting reconnect.");
-                    while let Err(err) = client.reconnect().await {
-                        log::info!("Error reconnecting: {}", err);
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                    log::info!("Reconnected!");
                 }
             }
         });
