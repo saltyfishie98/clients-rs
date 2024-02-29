@@ -1,26 +1,15 @@
 {
-    "mqtt_topics": [
+    "client_id": "saltyfishie_0",
+    "broker_uri": "mqtt://localhost:1883",
+    "subscriptions": [
         {
-            "topic": "saltyfishie",
+            "topic": "data/#",
             "qos": 1,
             "options": {
                 "no_local": false,
                 "retain_as_publish": false,
                 "retain_handling": 0
             }
-        },
-        {
-            "topic": "saltyfishie/#",
-            "qos": 1,
-            "options": {
-                "no_local": false,
-                "retain_as_publish": false,
-                "retain_handling": 0
-            }
-        },
-        {
-            "topic": "saltyfishie/thing",
-            "qos": 1
         }
     ]
 }

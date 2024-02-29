@@ -7,7 +7,7 @@ impl DatabaseClient {
         let connection_pool =
             match sqlx::MySqlPool::connect(&std::env::var("DATABASE_URL").unwrap()).await {
                 Ok(p) => {
-                    log::info!("Connected to database");
+                    log::info!("Connected to database server!");
                     p
                 }
                 Err(e) => {
@@ -35,20 +35,14 @@ impl DatabaseClient {
 }
 
 fn handle_query_error(e: sqlx::Error) {
-    match e {
-        sqlx::Error::Database(err) => {
-            if let Some(code) = err.code() {
-                match code.to_ascii_lowercase().as_str() {
-                    "3d000" => {
-                        log::error!("Database Error: {}", err.message());
-                    }
-                    _ => {}
-                }
-            } else {
-                log::error!("{}", err);
+    if let sqlx::Error::Database(err) = e {
+        if let Some(code) = err.code() {
+            if let "3d000" = code.to_ascii_lowercase().as_str() {
+                log::error!("Database Error: {}", err.message());
             }
-            std::process::exit(1);
+        } else {
+            log::error!("{}", err);
         }
-        _ => {}
+        std::process::exit(1);
     };
 }

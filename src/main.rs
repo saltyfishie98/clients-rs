@@ -1,15 +1,14 @@
 #[allow(dead_code)]
 mod client;
 
-use client::mqtt_config;
-use paho_mqtt::{self as mqtt, MQTT_VERSION_5};
-use serde_json::json;
+use client::topic;
+use paho_mqtt::MQTT_VERSION_5;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() -> Result<(), mqtt::Error> {
+async fn main() -> Result<(), paho_mqtt::Error> {
     env_logger::Builder::from_default_env()
         .filter_module("mqtt_sql_forwarder", log::LevelFilter::Info)
         .format(|buf, record| {
@@ -32,31 +31,39 @@ async fn main() -> Result<(), mqtt::Error> {
             if msg.retained() {
                 print!("(R) ");
             }
-            log::info!("Received message:\n\n{}\n", msg);
 
-            let json = serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap();
+            let msg_json: serde_json::Value = serde_json::from_slice(msg.payload()).unwrap();
 
-            if let serde_json::Value::Object(data) = json {
-                let mut keys = Vec::<&String>::new();
-                let mut values = Vec::<&serde_json::Value>::new();
+            log::info!(
+                "Received message\ntopic: {}, \npayload: {:#?}\n",
+                msg.topic(),
+                msg_json
+            );
 
-                data.iter().for_each(|(k, v)| {
-                    keys.push(k);
-                    values.push(v)
-                });
+            // use serde_json::json;
+            // let json = serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap();
 
-                let out = json!({
-                    "keys": keys,
-                    "values": values,
-                    "timestamp": chrono::Utc::now().to_string()
-                });
+            // if let serde_json::Value::Object(data) = json {
+            //     let mut keys = Vec::<&String>::new();
+            //     let mut values = Vec::<&serde_json::Value>::new();
 
-                mqtt_client.publish(mqtt::Message::new(
-                    "saltyfishie/echo",
-                    serde_json::to_string_pretty(&out).unwrap(),
-                    1,
-                ));
-            }
+            //     data.iter().for_each(|(k, v)| {
+            //         keys.push(k);
+            //         values.push(v)
+            //     });
+
+            //     let out = json!({
+            //         "keys": keys,
+            //         "values": values,
+            //         "timestamp": chrono::Utc::now().to_string()
+            //     });
+
+            //     mqtt_client.publish(paho_mqtt::Message::new(
+            //         "saltyfishie/echo",
+            //         serde_json::to_string_pretty(&out).unwrap(),
+            //         1,
+            //     ));
+            // }
         }
     }
 }
@@ -66,49 +73,56 @@ async fn make_db_client() -> client::DatabaseClient {
 }
 
 async fn make_mqtt_client() -> client::MqttClient {
-    let mqtt_create_options = mqtt::CreateOptionsBuilder::new()
-        .server_uri("mqtt://test.mosquitto.org:1883")
-        .client_id("saltyfishie_3")
-        .finalize();
-
-    let mqtt_connect_options = {
-        let lwt = mqtt::Message::new(
-            "saltyfishie/echo/lwt",
-            "[LWT] Async subscriber v5 lost connection",
-            mqtt::QOS_1,
-        );
-
-        mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
-            .keep_alive_interval(Duration::from_millis(5000))
-            .clean_start(false)
-            .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 60])
-            .will_message(lwt)
-            .finalize()
-    };
-
-    let subscriptions = {
+    let config: client::SetupConfig = {
         let source_dir = std::env::current_dir().unwrap();
         let config_file_path = source_dir.join("config").join("client.json");
 
-        log::info!("Configuration: \"{}\"", config_file_path.to_str().unwrap_or("{unknown}"));
+        log::info!(
+            "Configuration: \"{}\"",
+            config_file_path.to_str().unwrap_or("{unknown}")
+        );
+
         let file = match File::open(config_file_path) {
             Ok(f) => f,
             Err(e) => {
                 println!("Error opening config file: {}", e);
                 std::process::exit(1);
-            },
+            }
         };
 
         let config_reader = BufReader::new(file);
-        let config: client::Config =
-            serde_json::from_reader(config_reader).expect("Failed to deserialize JSON");
+        serde_json::from_reader(config_reader).expect("Failed to deserialize JSON")
+    };
 
-        let mut s = mqtt_config::MqttSubscriptions::new(None);
+    let mqtt_create_options = paho_mqtt::CreateOptionsBuilder::new()
+        .server_uri(&config.broker_uri)
+        .client_id(&config.client_id)
+        .finalize();
 
-        config.mqtt_topics.into_iter().for_each(|topic| {
+    let mqtt_connect_options = {
+        let lwt = paho_mqtt::Message::new(
+            "saltyfishie/echo/lwt",
+            "[LWT] Async subscriber v5 lost connection",
+            paho_mqtt::QOS_1,
+        );
+
+        paho_mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
+            .keep_alive_interval(Duration::from_millis(5000))
+            .clean_start(false)
+            .properties(
+                paho_mqtt::properties![paho_mqtt::PropertyCode::SessionExpiryInterval => 60],
+            )
+            .will_message(lwt)
+            .finalize()
+    };
+
+    let subscriptions = {
+        let mut s = topic::Subscriptions::new(None);
+
+        config.subscriptions.into_iter().for_each(|topic| {
             let opts = match topic.options {
                 Some(o) => o.into(),
-                None => mqtt::SubscribeOptions::default(),
+                None => paho_mqtt::SubscribeOptions::default(),
             };
             s.add(topic.topic.as_str(), topic.qos, opts);
         });
@@ -116,11 +130,11 @@ async fn make_mqtt_client() -> client::MqttClient {
         s.finalize()
     };
 
-    let out_client = client::MqttClient::new(mqtt_config::MqttClient {
+    let out_client = client::MqttClient::new(client::MqttClientConfig {
         mqtt_create_options,
         mqtt_connect_options,
         subscriptions,
-        msg_buffer_limit: 10,
+        msg_buffer_limit: 100,
     })
     .unwrap();
 

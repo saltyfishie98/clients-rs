@@ -2,18 +2,18 @@ use futures_util::StreamExt;
 use paho_mqtt as mqtt;
 use std::time::Duration;
 
-pub mod mqtt_config {
+pub mod topic {
     use super::*;
 
     #[derive(Default)]
-    pub struct MqttSubscriptions {
+    pub struct Subscriptions {
         pub(super) topics: Vec<String>,
         pub(super) qos: Vec<i32>,
         pub(super) opts: Vec<mqtt::SubscribeOptions>,
         pub(super) props: Option<mqtt::Properties>,
     }
 
-    impl MqttSubscriptions {
+    impl Subscriptions {
         pub fn new(props: Option<mqtt::Properties>) -> Self {
             Self {
                 topics: Vec::new(),
@@ -35,26 +35,26 @@ pub mod mqtt_config {
             self
         }
 
-        pub fn finalize(self) -> Self {
-            self
+        pub fn finalize(&mut self) -> Self {
+            std::mem::take(self)
         }
     }
+}
 
-    pub struct MqttClient {
-        pub mqtt_create_options: mqtt::CreateOptions,
-        pub mqtt_connect_options: mqtt::ConnectOptions,
-        pub msg_buffer_limit: usize,
-        pub subscriptions: MqttSubscriptions,
-    }
+pub struct MqttClientConfig {
+    pub mqtt_create_options: mqtt::CreateOptions,
+    pub mqtt_connect_options: mqtt::ConnectOptions,
+    pub msg_buffer_limit: usize,
+    pub subscriptions: topic::Subscriptions,
+}
 
-    impl Default for MqttClient {
-        fn default() -> Self {
-            Self {
-                mqtt_create_options: Default::default(),
-                mqtt_connect_options: Default::default(),
-                subscriptions: Default::default(),
-                msg_buffer_limit: 1,
-            }
+impl Default for MqttClientConfig {
+    fn default() -> Self {
+        Self {
+            mqtt_create_options: Default::default(),
+            mqtt_connect_options: Default::default(),
+            subscriptions: Default::default(),
+            msg_buffer_limit: 1,
         }
     }
 }
@@ -63,11 +63,11 @@ pub struct MqttClient {
     mqtt_client: mqtt::AsyncClient,
     mqtt_subscription_stream: mqtt::AsyncReceiver<Option<mqtt::Message>>,
     mqtt_connect_opt: mqtt::ConnectOptions,
-    mqtt_subscriptions: mqtt_config::MqttSubscriptions,
+    mqtt_subscriptions: topic::Subscriptions,
 }
 
 impl MqttClient {
-    pub fn new(config: mqtt_config::MqttClient) -> Result<Self, mqtt::Error> {
+    pub fn new(config: MqttClientConfig) -> Result<Self, mqtt::Error> {
         let mut mqtt_client = mqtt::AsyncClient::new(config.mqtt_create_options)?;
         let mqtt_subscription_stream = mqtt_client.get_stream(config.msg_buffer_limit);
 
@@ -82,10 +82,11 @@ impl MqttClient {
     pub async fn connect(&self) {
         let host = self.mqtt_client.server_uri();
 
-        while let Err(_) = self
+        while (self
             .mqtt_client
             .connect(self.mqtt_connect_opt.clone())
-            .await
+            .await)
+            .is_err()
         {
             log::warn!("Error establishing connection to '{}', retrying...", host);
         }
@@ -138,14 +139,15 @@ impl MqttClient {
             })
         };
 
-        while !self.mqtt_client.is_connected() {
-            let mut logger = log_lost_connection(host.clone());
+        let mut logger = log_lost_connection(host.clone());
 
+        while !self.mqtt_client.is_connected() {
             match self.mqtt_client.reconnect().await {
                 Ok(res) => {
                     log::debug!("Reconnection response: {:?}", res);
                     log::warn!("Reconnected to '{}'", host);
                     logger.abort();
+                    break;
                 }
                 Err(e) => {
                     log::debug!("Reconnection error: {}", e);
@@ -167,7 +169,11 @@ mod test {
 
     #[test]
     fn building_client() {
-        let configs = mqtt_config::MqttClient {
+        let subscriptions = topic::Subscriptions::new(None)
+            .add("saltyfishe", 1, Default::default())
+            .finalize();
+
+        let configs = topic::MqttClientConfig {
             mqtt_create_options: {
                 mqtt::CreateOptionsBuilder::new()
                     .server_uri("mqtt://test.mosquitto.org:1883")
@@ -191,7 +197,9 @@ mod test {
             },
 
             subscriptions: {
-                mqtt_config::MqttSubscriptions::new(None).add("saltyfishe", 1, Default::default())
+                topic::Subscriptions::new(None)
+                    .add("saltyfishe", 1, Default::default())
+                    .finalize()
             },
 
             msg_buffer_limit: 10,
@@ -239,11 +247,8 @@ mod test {
 
     #[test]
     fn building_subscriptions() {
-        let subs = mqtt_config::MqttSubscriptions::new(None).add(
-            "topic",
-            1,
-            mqtt::SubscribeOptions::default(),
-        );
+        let subs =
+            topic::Subscriptions::new(None).add("topic", 1, mqtt::SubscribeOptions::default());
 
         assert!(subs.topics[0] == "topic".to_string());
         assert!(subs.qos[0] == 1);
