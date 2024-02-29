@@ -3,8 +3,7 @@ mod client;
 
 use client::topic;
 use paho_mqtt::MQTT_VERSION_5;
-use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::Write;
 use std::time::Duration;
 
 #[tokio::main]
@@ -68,30 +67,56 @@ async fn main() -> Result<(), paho_mqtt::Error> {
     }
 }
 
-async fn make_db_client() -> client::DatabaseClient {
-    client::DatabaseClient::connect().await
-}
+async fn make_db_client() -> client::MysqlClient {
+    let config: client::setup_config::SqlServerSetupConfig = {
+        use client::setup_config::SqlServerSetupConfig;
 
-async fn make_mqtt_client() -> client::MqttClient {
-    let config: client::SetupConfig = {
         let source_dir = std::env::current_dir().unwrap();
-        let config_file_path = source_dir.join("config").join("client.json");
+        let config_file_path = source_dir.join("config").join("db_client.json");
 
         log::info!(
-            "Configuration: \"{}\"",
+            "Database client configuration: \"{}\"",
             config_file_path.to_str().unwrap_or("{unknown}")
         );
 
-        let file = match File::open(config_file_path) {
+        match SqlServerSetupConfig::try_from(config_file_path) {
             Ok(f) => f,
             Err(e) => {
                 println!("Error opening config file: {}", e);
                 std::process::exit(1);
             }
-        };
+        }
+    };
 
-        let config_reader = BufReader::new(file);
-        serde_json::from_reader(config_reader).expect("Failed to deserialize JSON")
+    let db_opts = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.username)
+        .password(&config.password)
+        .database(&config.database);
+
+    client::MysqlClient::connect_with(db_opts).await
+}
+
+async fn make_mqtt_client() -> client::MqttClient {
+    let config: client::setup_config::MqttSetupConfig = {
+        use client::setup_config::MqttSetupConfig;
+
+        let source_dir = std::env::current_dir().unwrap();
+        let config_file_path = source_dir.join("config").join("mqtt_client.json");
+
+        log::info!(
+            "Mqtt client configuration: \"{}\"",
+            config_file_path.to_str().unwrap_or("{unknown}")
+        );
+
+        match MqttSetupConfig::try_from(config_file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error opening config file: {}", e);
+                std::process::exit(1);
+            }
+        }
     };
 
     let mqtt_create_options = paho_mqtt::CreateOptionsBuilder::new()

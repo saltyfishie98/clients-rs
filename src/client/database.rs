@@ -1,13 +1,16 @@
-pub struct DatabaseClient {
+pub struct MysqlClient {
     connection_pool: sqlx::MySqlPool,
 }
 
-impl DatabaseClient {
+impl MysqlClient {
     pub async fn connect() -> Self {
         let connection_pool =
             match sqlx::MySqlPool::connect(&std::env::var("DATABASE_URL").unwrap()).await {
                 Ok(p) => {
-                    log::info!("Connected to database server!");
+                    log::info!(
+                        "Connected to database '{}'",
+                        p.connect_options().get_database().unwrap()
+                    );
                     p
                 }
                 Err(e) => {
@@ -15,6 +18,24 @@ impl DatabaseClient {
                     std::process::exit(1);
                 }
             };
+
+        Self { connection_pool }
+    }
+
+    pub async fn connect_with(options: sqlx::mysql::MySqlConnectOptions) -> Self {
+        let connection_pool = match sqlx::MySqlPool::connect_with(options).await {
+            Ok(p) => {
+                log::info!(
+                    "Connected to database '{}'!",
+                    p.connect_options().get_database().unwrap()
+                );
+                p
+            }
+            Err(e) => {
+                log::error!("Database Error: {}", e);
+                std::process::exit(1);
+            }
+        };
 
         Self { connection_pool }
     }
