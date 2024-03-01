@@ -8,6 +8,79 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), paho_mqtt::Error> {
+    setup_logger();
+    dotenv::dotenv().ok();
+
+    run().await
+    // sandbox().await
+}
+
+async fn run() -> Result<(), paho_mqtt::Error> {
+    let (db_client, mut mqtt_client) = tokio::join!(make_db_client(), make_mqtt_client());
+
+    loop {
+        if let Some(msg) = mqtt_client.poll().await {
+            if msg.retained() {
+                print!("(R) ");
+            }
+
+            log::info!(
+                "Received message\ntopic: {}, \npayload: {:#?}\n",
+                msg.topic(),
+                serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap()
+            );
+
+            if let Err(err) = db_client
+                .push(msg.topic(), std::str::from_utf8(msg.payload()).unwrap())
+                .await
+            {
+                log::error!("db push error: {}", err)
+            };
+        }
+    }
+}
+
+#[allow(dead_code)]
+async fn sandbox() -> Result<(), paho_mqtt::Error> {
+    use sqlx::{Execute, MySql, QueryBuilder};
+
+    struct User {
+        username: String,
+        email: String,
+        password: String,
+    }
+
+    const BIND_LIMIT: usize = 65535;
+
+    let users = (0..5).map(|i| User {
+        username: format!("test_user_{i}"),
+        email: format!("test-user-{i}@example.com"),
+        password: format!("Test!User@Password#{i}"),
+    });
+
+    let mut query_builder: QueryBuilder<MySql> =
+        QueryBuilder::new("INSERT INTO user(username, email, password) ");
+
+    query_builder.push_values(users.take(BIND_LIMIT / 4), |mut b, user| {
+        b.push_bind(user.username)
+            .push_bind(user.email)
+            .push_bind(user.password);
+    });
+
+    let query = query_builder.build();
+    let sql = query.sql();
+
+    dbg!(sql);
+
+    let url = std::env::var("DATABASE_URL").expect("no DATABASE_URL environment variable");
+    let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
+
+    sqlx::query(query.sql()).execute(&pool).await.unwrap();
+
+    Ok(())
+}
+
+fn setup_logger() {
     env_logger::Builder::from_default_env()
         .filter_module("mqtt_sql_forwarder", log::LevelFilter::Info)
         .format(|buf, record| {
@@ -22,88 +95,17 @@ async fn main() -> Result<(), paho_mqtt::Error> {
             )
         })
         .init();
-
-    let (_db_client_haiwell, mut mqtt_client) = tokio::join!(make_db_client(), make_mqtt_client());
-
-    loop {
-        if let Some(msg) = mqtt_client.poll().await {
-            if msg.retained() {
-                print!("(R) ");
-            }
-
-            let msg_json: serde_json::Value = serde_json::from_slice(msg.payload()).unwrap();
-
-            log::info!(
-                "Received message\ntopic: {}, \npayload: {:#?}\n",
-                msg.topic(),
-                msg_json
-            );
-
-            // use serde_json::json;
-            // let json = serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap();
-
-            // if let serde_json::Value::Object(data) = json {
-            //     let mut keys = Vec::<&String>::new();
-            //     let mut values = Vec::<&serde_json::Value>::new();
-
-            //     data.iter().for_each(|(k, v)| {
-            //         keys.push(k);
-            //         values.push(v)
-            //     });
-
-            //     let out = json!({
-            //         "keys": keys,
-            //         "values": values,
-            //         "timestamp": chrono::Utc::now().to_string()
-            //     });
-
-            //     mqtt_client.publish(paho_mqtt::Message::new(
-            //         "saltyfishie/echo",
-            //         serde_json::to_string_pretty(&out).unwrap(),
-            //         1,
-            //     ));
-            // }
-        }
-    }
-}
-
-async fn make_db_client() -> client::MysqlClient {
-    let config: client::setup_config::SqlServerSetupConfig = {
-        use client::setup_config::SqlServerSetupConfig;
-
-        let source_dir = std::env::current_dir().unwrap();
-        let config_file_path = source_dir.join("config").join("db_client.json");
-
-        log::info!(
-            "Database client configuration: \"{}\"",
-            config_file_path.to_str().unwrap_or("{unknown}")
-        );
-
-        match SqlServerSetupConfig::try_from(config_file_path) {
-            Ok(f) => f,
-            Err(e) => {
-                println!("Error opening config file: {}", e);
-                std::process::exit(1);
-            }
-        }
-    };
-
-    let db_opts = sqlx::mysql::MySqlConnectOptions::new()
-        .host(&config.host)
-        .port(config.port)
-        .username(&config.username)
-        .password(&config.password)
-        .database(&config.database);
-
-    client::MysqlClient::connect_with(db_opts).await
 }
 
 async fn make_mqtt_client() -> client::MqttClient {
-    let config: client::setup_config::MqttSetupConfig = {
-        use client::setup_config::MqttSetupConfig;
+    use client::{
+        setup_config::{self, MqttSetupConfig},
+        MqttClientConfig,
+    };
 
+    let config: setup_config::MqttSetupConfig = {
         let source_dir = std::env::current_dir().unwrap();
-        let config_file_path = source_dir.join("config").join("mqtt_client.json");
+        let config_file_path = source_dir.join("configs").join("mqtt_connection.json");
 
         log::info!(
             "Mqtt client configuration: \"{}\"",
@@ -144,9 +146,9 @@ async fn make_mqtt_client() -> client::MqttClient {
     let subscriptions = {
         let mut s = topic::Subscriptions::new(None);
 
-        config.subscriptions.into_iter().for_each(|topic| {
-            let opts = match topic.options {
-                Some(o) => o.into(),
+        config.subscriptions.iter().for_each(|topic| {
+            let opts: paho_mqtt::SubscribeOptions = match &topic.options {
+                Some(o) => (*o).into(),
                 None => paho_mqtt::SubscribeOptions::default(),
             };
             s.add(topic.topic.as_str(), topic.qos, opts);
@@ -155,14 +157,64 @@ async fn make_mqtt_client() -> client::MqttClient {
         s.finalize()
     };
 
-    let out_client = client::MqttClient::new(client::MqttClientConfig {
+    client::MqttClient::start(MqttClientConfig {
         mqtt_create_options,
         mqtt_connect_options,
         subscriptions,
         msg_buffer_limit: 100,
     })
-    .unwrap();
+    .await
+}
 
-    out_client.connect().await;
-    out_client
+async fn make_db_client() -> client::MysqlClient {
+    use client::{
+        setup_config::{self, SqlServerSetupConfig},
+        MysqlClientConfig,
+    };
+
+    let config: setup_config::SqlServerSetupConfig = {
+        let source_dir = std::env::current_dir().unwrap();
+        let config_file_path = source_dir.join("configs").join("db_connection.json");
+
+        log::info!(
+            "Database client configuration: \"{}\"",
+            config_file_path.to_str().unwrap_or("{unknown}")
+        );
+
+        match SqlServerSetupConfig::try_from(config_file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Error opening config file: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    let mut db_opts = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&config.host)
+        .username(&config.username)
+        .database(&config.database);
+
+    match &config.password {
+        Some(password) => {
+            db_opts = db_opts.password(password);
+        }
+        None => {
+            let password = match std::env::var("DB_PASSWORD") {
+                Ok(o) => o,
+                Err(_) => "".to_string(),
+            };
+            db_opts = db_opts.password(&password);
+        }
+    }
+
+    if let Some(port) = &config.port {
+        db_opts = db_opts.port(*port);
+    }
+
+    client::MysqlClient::start(MysqlClientConfig {
+        connect_options: db_opts,
+        topic_table_map: config.topic_table_map,
+    })
+    .await
 }

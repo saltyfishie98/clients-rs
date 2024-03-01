@@ -19,6 +19,8 @@ log = "0.4.20"
 sqlx = { version = "0.7.3", features = ["mysql", "runtime-tokio", "time"] }
 serde = "1.0.197"
 futures-util = "0.3.30"
+tealr = "0.9.1"
+dotenv = "0.15.0"
 
 [build-dependencies]
 cargo_metadata = "0.18.1"

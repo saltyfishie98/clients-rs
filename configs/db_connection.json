@@ -1,0 +1,8 @@
+{
+    "host": "localhost",
+    "username": "user",
+    "database": "mqtt_testing",
+    "topic_table_map": {
+        "data/REP240003/runtime/7121339009090197001": "REP240003_runtime"
+    }
+}

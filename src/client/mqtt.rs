@@ -67,52 +67,25 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn new(config: MqttClientConfig) -> Result<Self, mqtt::Error> {
-        let mut mqtt_client = mqtt::AsyncClient::new(config.mqtt_create_options)?;
-        let mqtt_subscription_stream = mqtt_client.get_stream(config.msg_buffer_limit);
+    pub async fn start(config: MqttClientConfig) -> Self {
+        let mut mqtt_client = match mqtt::AsyncClient::new(config.mqtt_create_options) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("MqttClient start error: {}", e);
+                std::process::exit(1)
+            }
+        };
 
-        Ok(MqttClient {
+        let mqtt_subscription_stream = mqtt_client.get_stream(config.msg_buffer_limit);
+        let out = MqttClient {
             mqtt_client,
             mqtt_subscription_stream,
             mqtt_connect_opt: config.mqtt_connect_options,
             mqtt_subscriptions: config.subscriptions,
-        })
-    }
+        };
 
-    pub async fn connect(&self) {
-        let host = self.mqtt_client.server_uri();
-
-        while (self
-            .mqtt_client
-            .connect(self.mqtt_connect_opt.clone())
-            .await)
-            .is_err()
-        {
-            log::warn!("Error establishing connection to '{}', retrying...", host);
-        }
-        log::info!("Connected to broker '{}'", host);
-
-        let mut subscription = self.mqtt_client.subscribe_many_with_options(
-            &self.mqtt_subscriptions.topics,
-            &self.mqtt_subscriptions.qos,
-            &self.mqtt_subscriptions.opts,
-            self.mqtt_subscriptions.props.clone(),
-        );
-
-        // while self.mqtt_client.is_connected() {}
-
-        loop {
-            // Does not work on paho.mqtt.rust v0.12.3
-            if subscription.try_wait().is_none() {
-                if !self.mqtt_client.is_connected() {
-                    self.reconnect().await;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        log::info!("Subscribed to topics: {:?}", self.mqtt_subscriptions.topics);
+        Self::connect(&out).await;
+        out
     }
 
     pub async fn poll(&mut self) -> Option<mqtt::Message> {
@@ -158,6 +131,42 @@ impl MqttClient {
             }
         }
     }
+
+    async fn connect(&self) {
+        let host = self.mqtt_client.server_uri();
+
+        while (self
+            .mqtt_client
+            .connect(self.mqtt_connect_opt.clone())
+            .await)
+            .is_err()
+        {
+            log::warn!("Error establishing connection to '{}', retrying...", host);
+        }
+        log::info!("Connected to broker '{}'", host);
+
+        let mut subscription = self.mqtt_client.subscribe_many_with_options(
+            &self.mqtt_subscriptions.topics,
+            &self.mqtt_subscriptions.qos,
+            &self.mqtt_subscriptions.opts,
+            self.mqtt_subscriptions.props.clone(),
+        );
+
+        // while self.mqtt_client.is_connected() {}
+
+        loop {
+            // Does not work on paho.mqtt.rust v0.12.3
+            if subscription.try_wait().is_none() {
+                if !self.mqtt_client.is_connected() {
+                    self.reconnect().await;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        log::info!("Subscribed to topics: {:?}", self.mqtt_subscriptions.topics);
+    }
 }
 
 #[cfg(test)]
@@ -169,11 +178,13 @@ mod test {
 
     #[test]
     fn building_client() {
-        let subscriptions = topic::Subscriptions::new(None)
-            .add("saltyfishe", 1, Default::default())
-            .finalize();
+        let _subscriptions = {
+            let mut s = topic::Subscriptions::new(None);
+            s.add("saltyfishe", 1, Default::default());
+            s.finalize()
+        };
 
-        let configs = topic::MqttClientConfig {
+        let configs = MqttClientConfig {
             mqtt_create_options: {
                 mqtt::CreateOptionsBuilder::new()
                     .server_uri("mqtt://test.mosquitto.org:1883")
@@ -197,18 +208,18 @@ mod test {
             },
 
             subscriptions: {
-                topic::Subscriptions::new(None)
-                    .add("saltyfishe", 1, Default::default())
-                    .finalize()
+                let mut s = topic::Subscriptions::new(None);
+                s.add("saltyfishe", 1, Default::default());
+                s.finalize()
             },
 
             msg_buffer_limit: 10,
         };
 
-        let mut client = MqttClient::new(configs).unwrap();
-
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
+            let mut client = MqttClient::start(configs).await;
+
             client.connect().await;
             loop {
                 if let Some(msg) = client.poll().await {
@@ -247,8 +258,11 @@ mod test {
 
     #[test]
     fn building_subscriptions() {
-        let subs =
-            topic::Subscriptions::new(None).add("topic", 1, mqtt::SubscribeOptions::default());
+        let subs = {
+            let mut s = topic::Subscriptions::new(None);
+            s.add("topic", 1, mqtt::SubscribeOptions::default());
+            s.finalize()
+        };
 
         assert!(subs.topics[0] == "topic".to_string());
         assert!(subs.qos[0] == 1);

@@ -18,7 +18,7 @@ impl TryFrom<PathBuf> for MqttSetupConfig {
 }
 
 pub mod mqtt {
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize, Clone, Copy)]
     pub struct TopicOptions {
         pub no_local: bool,
         pub retain_as_publish: bool,
@@ -51,10 +51,11 @@ pub mod mqtt {
 #[derive(Debug, serde::Deserialize)]
 pub struct SqlServerSetupConfig {
     pub host: String,
-    pub port: u16,
     pub username: String,
-    pub password: String,
+    pub password: Option<String>,
     pub database: String,
+    pub port: Option<u16>,
+    pub topic_table_map: sql_server::TopicTableMapping,
 }
 
 impl TryFrom<PathBuf> for SqlServerSetupConfig {
@@ -67,4 +68,8 @@ impl TryFrom<PathBuf> for SqlServerSetupConfig {
     }
 }
 
-pub mod sql_server {}
+pub mod sql_server {
+    use std::collections::HashMap;
+
+    pub type TopicTableMapping = HashMap<String, String>;
+}
