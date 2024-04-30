@@ -12,7 +12,6 @@ async fn main() -> Result<(), paho_mqtt::Error> {
     dotenv::dotenv().ok();
 
     run().await
-    // sandbox().await
 }
 
 async fn run() -> Result<(), paho_mqtt::Error> {
@@ -40,46 +39,6 @@ async fn run() -> Result<(), paho_mqtt::Error> {
     }
 }
 
-#[allow(dead_code)]
-async fn sandbox() -> Result<(), paho_mqtt::Error> {
-    use sqlx::{Execute, MySql, QueryBuilder};
-
-    struct User {
-        username: String,
-        email: String,
-        password: String,
-    }
-
-    const BIND_LIMIT: usize = 65535;
-
-    let users = (0..5).map(|i| User {
-        username: format!("test_user_{i}"),
-        email: format!("test-user-{i}@example.com"),
-        password: format!("Test!User@Password#{i}"),
-    });
-
-    let mut query_builder: QueryBuilder<MySql> =
-        QueryBuilder::new("INSERT INTO user(username, email, password) ");
-
-    query_builder.push_values(users.take(BIND_LIMIT / 4), |mut b, user| {
-        b.push_bind(user.username)
-            .push_bind(user.email)
-            .push_bind(user.password);
-    });
-
-    let query = query_builder.build();
-    let sql = query.sql();
-
-    dbg!(sql);
-
-    let url = std::env::var("DATABASE_URL").expect("no DATABASE_URL environment variable");
-    let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
-
-    sqlx::query(query.sql()).execute(&pool).await.unwrap();
-
-    Ok(())
-}
-
 fn setup_logger() {
     env_logger::Builder::from_default_env()
         .filter_module("mqtt_sql_forwarder", log::LevelFilter::Info)
@@ -103,10 +62,10 @@ async fn make_mqtt_client() -> client::MqttClient {
         MqttClientConfig,
     };
 
-    let config: setup_config::MqttSetupConfig = {
-        let source_dir = std::env::current_dir().unwrap();
-        let config_file_path = source_dir.join("configs").join("mqtt_connection.json");
+    let source_dir = std::env::current_dir().unwrap();
+    let config_file_path = source_dir.join("configs").join("mqtt_connection.json");
 
+    let config: setup_config::MqttSetupConfig = {
         log::info!(
             "Mqtt client configuration: \"{}\"",
             config_file_path.to_str().unwrap_or("{unknown}")

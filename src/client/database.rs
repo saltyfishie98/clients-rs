@@ -68,8 +68,16 @@ impl MysqlClient {
         };
 
         if let serde_json::Value::Object(data) = payload_any {
+            let table = match self.topic_table_map.get(topic) {
+                Some(t) => t,
+                None => {
+                    log::warn!("Map for '{}' is not specified", topic);
+                    return Ok(());
+                },
+            };
+
             let mut builder: sqlx::QueryBuilder<sqlx::MySql> =
-                sqlx::QueryBuilder::new(format_args!("INSERT INTO `{}`", topic).to_string());
+                sqlx::QueryBuilder::new(format_args!("INSERT INTO `{}`", table).to_string());
 
             let mut col_name = data.keys().fold(String::new(), |acc, key| {
                 if !acc.is_empty() {
@@ -99,7 +107,10 @@ impl MysqlClient {
             insert.push_unseparated(")");
 
             let query = builder.build();
-            query.execute(&self.connection_pool).await.unwrap();
+            match query.execute(&self.connection_pool).await {
+                Ok(_) => {},
+                Err(e) => log::error!("{}", e),
+            }
 
             Ok(())
         } else {

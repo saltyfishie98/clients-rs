@@ -202,14 +202,14 @@ mod test {
                 mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
                     .keep_alive_interval(Duration::from_millis(5000))
                     .clean_start(false)
-                    .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 60])
+                    .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 0xFFFFFFFF as u32])
                     .will_message(lwt)
                     .finalize()
             },
 
             subscriptions: {
                 let mut s = topic::Subscriptions::new(None);
-                s.add("saltyfishe", 1, Default::default());
+                s.add("saltyfishe", mqtt::QOS_1, Default::default());
                 s.finalize()
             },
 
