@@ -1,6 +1,8 @@
 use futures_util::StreamExt;
+use paho::MQTT_VERSION_5;
 use paho_mqtt as paho;
-use std::time::Duration;
+use serde::Deserialize;
+use std::{collections::HashMap, time::Duration};
 
 pub mod topic {
     use super::*;
@@ -39,6 +41,84 @@ pub mod topic {
             std::mem::take(self)
         }
     }
+
+    pub mod options {
+        use super::*;
+        use serde::de::Visitor;
+
+        #[derive(Debug)]
+        pub struct RetainHandling {
+            pub(super) inner: paho::RetainHandling,
+        }
+        impl<'de> Deserialize<'de> for RetainHandling {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct PahoRetainHandlingVisitor;
+                impl<'de> Visitor<'de> for PahoRetainHandlingVisitor {
+                    type Value = paho::RetainHandling;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        formatter.write_str("integer 0, 1, or 2")
+                    }
+
+                    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match v {
+                            0 => Ok(paho::RetainHandling::SendRetainedOnSubscribe),
+                            1 => Ok(paho::RetainHandling::SendRetainedOnNew),
+                            2 => Ok(paho::RetainHandling::DontSendRetained),
+                            _ => Err(serde::de::Error::unknown_variant(
+                                &format!("{v}"),
+                                &["0", "1", "2"],
+                            )),
+                        }
+                    }
+                }
+
+                let inner = deserializer.deserialize_u64(PahoRetainHandlingVisitor)?;
+                Ok(RetainHandling { inner })
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Options {
+        pub no_local: bool,
+        pub retain_as_publish: bool,
+        pub retain_handling: options::RetainHandling,
+    }
+    impl From<Options> for paho_mqtt::SubscribeOptions {
+        fn from(value: Options) -> Self {
+            paho_mqtt::SubscribeOptionsBuilder::new()
+                .no_local(value.no_local)
+                .retain_as_published(value.retain_as_publish)
+                .retain_handling(value.retain_handling.inner)
+                .finalize()
+        }
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    pub struct Settings {
+        pub qos: i32,
+        pub options: Option<Options>,
+    }
+
+    pub type Topic = HashMap<String, Settings>;
+}
+
+pub mod deserialized {
+    use super::*;
+
+    #[derive(Debug, serde::Deserialize, Default)]
+    pub struct MqttClientConfig {
+        pub client_id: String,
+        pub broker_uri: String,
+        pub subscriptions: Vec<topic::Topic>,
+    }
 }
 
 pub struct MqttClientConfig {
@@ -47,7 +127,57 @@ pub struct MqttClientConfig {
     pub msg_buffer_limit: usize,
     pub subscriptions: topic::Subscriptions,
 }
+impl From<deserialized::MqttClientConfig> for MqttClientConfig {
+    fn from(value: deserialized::MqttClientConfig) -> Self {
+        let mqtt_create_options = paho::CreateOptionsBuilder::new()
+            .server_uri(value.broker_uri)
+            .client_id(value.client_id)
+            .finalize();
 
+        let mqtt_connect_options = {
+            let lwt = paho_mqtt::Message::new(
+                "saltyfishie/echo/lwt",
+                "[LWT] Async subscriber v5 lost connection",
+                paho_mqtt::QOS_1,
+            );
+
+            paho_mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
+                .keep_alive_interval(Duration::from_millis(5000))
+                .clean_start(false)
+                .properties(
+                    paho_mqtt::properties![paho_mqtt::PropertyCode::SessionExpiryInterval => 60],
+                )
+                .will_message(lwt)
+                .finalize()
+        };
+
+        let subscriptions = {
+            let mut s = topic::Subscriptions::new(None);
+
+            value.subscriptions.into_iter().for_each(|topic| {
+                topic.into_iter().for_each(|(k, v)| {
+                    s.add(
+                        &k,
+                        v.qos,
+                        match v.options {
+                            Some(o) => o.into(),
+                            None => paho_mqtt::SubscribeOptions::default(),
+                        },
+                    );
+                })
+            });
+
+            s.finalize()
+        };
+
+        Self {
+            mqtt_create_options,
+            mqtt_connect_options,
+            msg_buffer_limit: 100,
+            subscriptions,
+        }
+    }
+}
 impl Default for MqttClientConfig {
     fn default() -> Self {
         Self {
@@ -171,10 +301,8 @@ impl MqttClient {
 
 #[cfg(test)]
 mod test {
-    use paho::MQTT_VERSION_5;
-    use serde_json::json;
-
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn building_client() {

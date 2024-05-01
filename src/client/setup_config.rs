@@ -1,13 +1,13 @@
 use std::{fs::File, io::BufReader, path::PathBuf};
 
 #[derive(Debug, serde::Deserialize)]
-pub struct MqttSetupConfig {
+pub struct MqttClientOptions {
     pub client_id: String,
     pub broker_uri: String,
     pub subscriptions: Vec<mqtt::Topic>,
 }
 
-impl TryFrom<PathBuf> for MqttSetupConfig {
+impl TryFrom<PathBuf> for MqttClientOptions {
     type Error = std::io::Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {

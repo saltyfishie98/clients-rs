@@ -11,13 +11,12 @@
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=mqtt-sql-forwarder",
-                    "--package=mqtt-sql-forwarder"
+                    "--example=sandbox",
                 ],
-                "filter": {
-                    "name": "mqtt-sql-forwarder",
-                    "kind": "bin"
-                }
+                // "filter": {
+                //     "name": "examples/sandbox",
+                //     "kind": "bin"
+                // }
             },
             "args": [],
             "env": {

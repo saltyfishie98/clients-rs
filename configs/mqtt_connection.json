@@ -1,6 +1,7 @@
     {
         "client_id": "saltyfishie_1",
         "broker_uri": "mqtt://localhost:1883",
+        "connection_settings": {},
         "subscriptions": [
             {
                 "data/REP240003/runtime/#": {
