@@ -15,26 +15,27 @@ async fn run() -> Result<(), paho_mqtt::Error> {
     // let (db_client, mut mqtt_client) = tokio::join!(make_db_client(), make_mqtt_client());
     let (mut mqtt_client,) = tokio::join!(make_mqtt_client());
 
-    loop {
-        if let Some(msg) = mqtt_client.poll().await {
-            if msg.retained() {
-                print!("(R) ");
-            }
-
-            log::info!(
-                "Received message\ntopic: {}, \npayload: {:#?}\n",
-                msg.topic(),
-                serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap()
-            );
-
-            // if let Err(err) = db_client
-            //     .push(msg.topic(), std::str::from_utf8(msg.payload()).unwrap())
-            //     .await
-            // {
-            //     log::error!("db push error: {}", err)
-            // };
+    // loop {
+    if let Some(msg) = mqtt_client.poll().await {
+        if msg.retained() {
+            print!("(R) ");
         }
+
+        log::info!(
+            "Received message\ntopic: {}, \npayload: {:#?}\n",
+            msg.topic(),
+            serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap()
+        );
+
+        // if let Err(err) = db_client
+        //     .push(msg.topic(), std::str::from_utf8(msg.payload()).unwrap())
+        //     .await
+        // {
+        //     log::error!("db push error: {}", err)
+        // };
     }
+    Ok(())
+    // }
 }
 
 fn setup_logger() {
@@ -62,6 +63,8 @@ async fn make_mqtt_client() -> client::MqttClient {
     let config_reader = BufReader::new(file);
     let config: deserialized::MqttClientConfig =
         serde_json::from_reader(config_reader).expect("Failed to deserialize JSON");
+
+    dbg!(&config);
 
     client::MqttClient::start(config.into()).await
 }

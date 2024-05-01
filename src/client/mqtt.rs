@@ -2,65 +2,45 @@ use futures_util::StreamExt;
 use paho::MQTT_VERSION_5;
 use paho_mqtt as paho;
 use serde::Deserialize;
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
-pub mod topic {
+pub mod deserialized {
     use super::*;
+    use serde::de::Visitor;
 
-    #[derive(Default, Debug)]
-    pub struct Subscriptions {
-        pub(super) topics: Vec<String>,
-        pub(super) qos: Vec<i32>,
-        pub(super) opts: Vec<paho::SubscribeOptions>,
-        pub(super) props: Option<paho::Properties>,
-    }
-
-    impl Subscriptions {
-        pub fn new(props: Option<paho::Properties>) -> Self {
-            Self {
-                topics: Vec::new(),
-                qos: Vec::new(),
-                opts: Vec::new(),
-                props,
-            }
-        }
-
-        pub fn add(
-            &mut self,
-            topic: impl Into<String>,
-            qos: i32,
-            opt: paho::SubscribeOptions,
-        ) -> &Self {
-            self.topics.push(topic.into());
-            self.qos.push(qos);
-            self.opts.push(opt);
-            self
-        }
-
-        pub fn finalize(&mut self) -> Self {
-            std::mem::take(self)
-        }
-    }
-
-    pub mod options {
+    pub mod subscribe_options {
         use super::*;
-        use serde::de::Visitor;
 
         #[derive(Debug)]
         pub struct RetainHandling {
-            pub(super) inner: paho::RetainHandling,
+            pub(crate) inner: paho::RetainHandling,
         }
         impl<'de> Deserialize<'de> for RetainHandling {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
+                const VALID_RETAIN_HANDLING: &[&str] = &["0", "1", "2"];
+
                 struct PahoRetainHandlingVisitor;
                 impl<'de> Visitor<'de> for PahoRetainHandlingVisitor {
                     type Value = paho::RetainHandling;
 
                     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                         formatter.write_str("integer 0, 1, or 2")
+                    }
+
+                    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match TryInto::<i64>::try_into(v) {
+                            Ok(v) => self.visit_i64(v),
+                            _ => Err(serde::de::Error::unknown_variant(
+                                &format!("{v}"),
+                                VALID_RETAIN_HANDLING,
+                            )),
+                        }
                     }
 
                     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
@@ -73,7 +53,7 @@ pub mod topic {
                             2 => Ok(paho::RetainHandling::DontSendRetained),
                             _ => Err(serde::de::Error::unknown_variant(
                                 &format!("{v}"),
-                                &["0", "1", "2"],
+                                VALID_RETAIN_HANDLING,
                             )),
                         }
                     }
@@ -86,13 +66,13 @@ pub mod topic {
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct Options {
-        pub no_local: bool,
-        pub retain_as_publish: bool,
-        pub retain_handling: options::RetainHandling,
+    pub struct SubscribeOptions {
+        pub(crate) no_local: bool,
+        pub(crate) retain_as_publish: bool,
+        pub(crate) retain_handling: subscribe_options::RetainHandling,
     }
-    impl From<Options> for paho_mqtt::SubscribeOptions {
-        fn from(value: Options) -> Self {
+    impl From<SubscribeOptions> for paho_mqtt::SubscribeOptions {
+        fn from(value: SubscribeOptions) -> Self {
             paho_mqtt::SubscribeOptionsBuilder::new()
                 .no_local(value.no_local)
                 .retain_as_published(value.retain_as_publish)
@@ -101,31 +81,88 @@ pub mod topic {
         }
     }
 
-    #[derive(Debug, serde::Deserialize)]
-    pub struct Settings {
-        pub qos: i32,
-        pub options: Option<Options>,
+    #[derive(Debug, Deserialize)]
+    pub struct Properties {}
+    impl Into<paho::Properties> for Properties {
+        fn into(self) -> paho::Properties {
+            // TODO: actually read
+            paho::Properties::default()
+        }
     }
 
-    pub type Topic = HashMap<String, Settings>;
+    #[derive(Default, Debug)]
+    pub struct Subscriptions {
+        pub(crate) topics: Vec<String>,
+        pub(crate) qos: Vec<i32>,
+        pub(crate) opts: Vec<SubscribeOptions>,
+    }
+    impl<'de> Deserialize<'de> for Subscriptions {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct SubscriptionVisitor;
+            impl<'de> Visitor<'de> for SubscriptionVisitor {
+                type Value = Subscriptions;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("tables")
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::MapAccess<'de>,
+                {
+                    #[derive(Deserialize)]
+                    struct SettingFields {
+                        qos: i32,
+                        options: SubscribeOptions,
+                    }
+
+                    let mut out = Self::Value::default();
+                    while let Some((k, v)) = map.next_entry::<String, SettingFields>()? {
+                        out.topics.push(k.to_string());
+                        out.qos.push(v.qos);
+                        out.opts.push(v.options);
+                    }
+                    Ok(out)
+                }
+            }
+            deserializer.deserialize_map(SubscriptionVisitor)
+        }
+    }
+
+    #[derive(Debug, Default, Deserialize)]
+    pub struct MqttClientConfig {
+        pub(crate) client_id: String,
+        pub(crate) broker_uri: String,
+        pub(crate) subscription_props: Option<Properties>,
+        pub(crate) subscriptions: Subscriptions,
+    }
 }
 
-pub mod deserialized {
-    use super::*;
-
-    #[derive(Debug, serde::Deserialize, Default)]
-    pub struct MqttClientConfig {
-        pub client_id: String,
-        pub broker_uri: String,
-        pub subscriptions: Vec<topic::Topic>,
+#[derive(Default, Debug)]
+pub(crate) struct SubscriptionData {
+    pub(crate) topics: Vec<String>,
+    pub(crate) qos: Vec<i32>,
+    pub(crate) opts: Vec<paho::SubscribeOptions>,
+}
+impl From<deserialized::Subscriptions> for SubscriptionData {
+    fn from(value: deserialized::Subscriptions) -> Self {
+        SubscriptionData {
+            topics: value.topics,
+            qos: value.qos,
+            opts: value.opts.into_iter().map(|o| o.into()).collect(),
+        }
     }
 }
 
 pub struct MqttClientConfig {
-    pub mqtt_create_options: paho::CreateOptions,
-    pub mqtt_connect_options: paho::ConnectOptions,
-    pub msg_buffer_limit: usize,
-    pub subscriptions: topic::Subscriptions,
+    pub(crate) mqtt_create_options: paho::CreateOptions,
+    pub(crate) mqtt_connect_options: paho::ConnectOptions,
+    pub(crate) msg_buffer_limit: usize,
+    pub(crate) subscription_props: Option<paho::Properties>,
+    pub(crate) subscriptions: SubscriptionData,
 }
 impl From<deserialized::MqttClientConfig> for MqttClientConfig {
     fn from(value: deserialized::MqttClientConfig) -> Self {
@@ -151,29 +188,17 @@ impl From<deserialized::MqttClientConfig> for MqttClientConfig {
                 .finalize()
         };
 
-        let subscriptions = {
-            let mut s = topic::Subscriptions::new(None);
-
-            value.subscriptions.into_iter().for_each(|topic| {
-                topic.into_iter().for_each(|(k, v)| {
-                    s.add(
-                        &k,
-                        v.qos,
-                        match v.options {
-                            Some(o) => o.into(),
-                            None => paho_mqtt::SubscribeOptions::default(),
-                        },
-                    );
-                })
-            });
-
-            s.finalize()
+        let subscriptions = value.subscriptions.into();
+        let subscription_props = match value.subscription_props {
+            Some(p) => Some(p.into()),
+            None => None,
         };
 
         Self {
             mqtt_create_options,
             mqtt_connect_options,
             msg_buffer_limit: 100,
+            subscription_props,
             subscriptions,
         }
     }
@@ -183,17 +208,19 @@ impl Default for MqttClientConfig {
         Self {
             mqtt_create_options: Default::default(),
             mqtt_connect_options: Default::default(),
-            subscriptions: Default::default(),
             msg_buffer_limit: 1,
+            subscription_props: None,
+            subscriptions: Default::default(),
         }
     }
 }
 
 pub struct MqttClient {
-    mqtt_client: paho::AsyncClient,
-    mqtt_subscription_stream: paho::AsyncReceiver<Option<paho::Message>>,
-    mqtt_connect_opt: paho::ConnectOptions,
-    mqtt_subscriptions: topic::Subscriptions,
+    pub(crate) mqtt_client: paho::AsyncClient,
+    pub(crate) mqtt_subscription_stream: paho::AsyncReceiver<Option<paho::Message>>,
+    pub(crate) mqtt_connect_opt: paho::ConnectOptions,
+    pub(crate) mqtt_subscription_props: Option<paho::Properties>,
+    pub(crate) mqtt_subscriptions: SubscriptionData,
 }
 
 impl MqttClient {
@@ -211,6 +238,7 @@ impl MqttClient {
             mqtt_client,
             mqtt_subscription_stream,
             mqtt_connect_opt: config.mqtt_connect_options,
+            mqtt_subscription_props: config.subscription_props,
             mqtt_subscriptions: config.subscriptions,
         };
 
@@ -279,7 +307,7 @@ impl MqttClient {
             &self.mqtt_subscriptions.topics,
             &self.mqtt_subscriptions.qos,
             &self.mqtt_subscriptions.opts,
-            self.mqtt_subscriptions.props.clone(),
+            self.mqtt_subscription_props.clone(),
         );
 
         // while self.mqtt_client.is_connected() {}
@@ -300,99 +328,4 @@ impl MqttClient {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn building_client() {
-        let _subscriptions = {
-            let mut s = topic::Subscriptions::new(None);
-            s.add("saltyfishe", 1, Default::default());
-            s.finalize()
-        };
-
-        let configs = MqttClientConfig {
-            mqtt_create_options: {
-                paho::CreateOptionsBuilder::new()
-                    .server_uri("paho://test.mosquitto.org:1883")
-                    .client_id("saltyfishie_1")
-                    .finalize()
-            },
-
-            mqtt_connect_options: {
-                let lwt = paho::Message::new(
-                    "saltyfishie/echo/lwt",
-                    "[LWT] Async subscriber v5 lost connection",
-                    paho::QOS_1,
-                );
-
-                paho::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
-                    .keep_alive_interval(Duration::from_millis(5000))
-                    .clean_start(false)
-                    .properties(paho::properties![paho::PropertyCode::SessionExpiryInterval => 0xFFFFFFFF as u32])
-                    .will_message(lwt)
-                    .finalize()
-            },
-
-            subscriptions: {
-                let mut s = topic::Subscriptions::new(None);
-                s.add("saltyfishe", paho::QOS_1, Default::default());
-                s.finalize()
-            },
-
-            msg_buffer_limit: 10,
-        };
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut client = MqttClient::start(configs).await;
-
-            client.connect().await;
-            loop {
-                if let Some(msg) = client.poll().await {
-                    if msg.retained() {
-                        print!("(R) ");
-                    }
-                    log::info!("\n{}", msg);
-
-                    let json = serde_json::from_slice::<serde_json::Value>(msg.payload()).unwrap();
-
-                    if let serde_json::Value::Object(data) = json {
-                        let mut keys = Vec::<&String>::new();
-                        let mut values = Vec::<&serde_json::Value>::new();
-
-                        data.iter().for_each(|(k, v)| {
-                            keys.push(k);
-                            values.push(v)
-                        });
-
-                        let out = json!({
-                            "keys": keys,
-                            "values": values,
-                            "timestamp": chrono::Utc::now().to_string()
-                        });
-
-                        client.publish(paho::Message::new(
-                            "saltyfishie/echo",
-                            serde_json::to_string_pretty(&out).unwrap(),
-                            1,
-                        ));
-                    }
-                }
-            }
-        });
-    }
-
-    #[test]
-    fn building_subscriptions() {
-        let subs = {
-            let mut s = topic::Subscriptions::new(None);
-            s.add("topic", 1, paho::SubscribeOptions::default());
-            s.finalize()
-        };
-
-        assert!(subs.topics[0] == "topic".to_string());
-        assert!(subs.qos[0] == 1);
-    }
-}
+mod test {}

@@ -2,16 +2,22 @@
         "client_id": "saltyfishie_1",
         "broker_uri": "mqtt://localhost:1883",
         "connection_settings": {},
-        "subscriptions": [
-            {
-                "data/REP240003/runtime/#": {
-                    "qos": 1,
-                    "options": {
-                        "no_local": false,
-                        "retain_as_publish": false,
-                        "retain_handling": 0
-                    }
+        "subscriptions": {
+            "data/REP240003/runtime/#": {
+                "qos": 1,
+                "options": {
+                    "no_local": false,
+                    "retain_as_publish": false,
+                    "retain_handling": 0
+                }
+            },
+            "data/REP240003/#": {
+                "qos": 1,
+                "options": {
+                    "no_local": false,
+                    "retain_as_publish": false,
+                    "retain_handling": 0
                 }
             }
-        ]
+        }
     }
