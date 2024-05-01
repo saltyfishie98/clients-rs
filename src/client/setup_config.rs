@@ -18,6 +18,8 @@ impl TryFrom<PathBuf> for MqttSetupConfig {
 }
 
 pub mod mqtt {
+    use std::collections::HashMap;
+
     #[derive(Debug, serde::Deserialize, Clone, Copy)]
     pub struct TopicOptions {
         pub no_local: bool,
@@ -40,9 +42,10 @@ pub mod mqtt {
         }
     }
 
+    pub type Topic = HashMap<String, TopicSettings>;
+
     #[derive(Debug, serde::Deserialize)]
-    pub struct Topic {
-        pub topic: String,
+    pub struct TopicSettings {
         pub qos: i32,
         pub options: Option<TopicOptions>,
     }

@@ -1,8 +1,6 @@
-#[allow(dead_code)]
-mod client;
-
 use client::topic;
 use paho_mqtt::MQTT_VERSION_5;
+use saltyfishie_clients as client;
 use std::io::Write;
 use std::time::Duration;
 
@@ -105,14 +103,20 @@ async fn make_mqtt_client() -> client::MqttClient {
     let subscriptions = {
         let mut s = topic::Subscriptions::new(None);
 
-        config.subscriptions.iter().for_each(|topic| {
-            let opts: paho_mqtt::SubscribeOptions = match &topic.options {
-                Some(o) => (*o).into(),
-                None => paho_mqtt::SubscribeOptions::default(),
-            };
-            s.add(topic.topic.as_str(), topic.qos, opts);
+        config.subscriptions.into_iter().for_each(|topic| {
+            topic.into_iter().for_each(|(k, v)| {
+                s.add(
+                    &k,
+                    v.qos,
+                    match v.options {
+                        Some(o) => o.into(),
+                        None => paho_mqtt::SubscribeOptions::default(),
+                    },
+                );
+            })
         });
 
+        dbg!(&s);
         s.finalize()
     };
 

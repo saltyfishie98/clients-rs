@@ -1,20 +1,20 @@
 use futures_util::StreamExt;
-use paho_mqtt as mqtt;
+use paho_mqtt as paho;
 use std::time::Duration;
 
 pub mod topic {
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     pub struct Subscriptions {
         pub(super) topics: Vec<String>,
         pub(super) qos: Vec<i32>,
-        pub(super) opts: Vec<mqtt::SubscribeOptions>,
-        pub(super) props: Option<mqtt::Properties>,
+        pub(super) opts: Vec<paho::SubscribeOptions>,
+        pub(super) props: Option<paho::Properties>,
     }
 
     impl Subscriptions {
-        pub fn new(props: Option<mqtt::Properties>) -> Self {
+        pub fn new(props: Option<paho::Properties>) -> Self {
             Self {
                 topics: Vec::new(),
                 qos: Vec::new(),
@@ -27,7 +27,7 @@ pub mod topic {
             &mut self,
             topic: impl Into<String>,
             qos: i32,
-            opt: mqtt::SubscribeOptions,
+            opt: paho::SubscribeOptions,
         ) -> &Self {
             self.topics.push(topic.into());
             self.qos.push(qos);
@@ -42,8 +42,8 @@ pub mod topic {
 }
 
 pub struct MqttClientConfig {
-    pub mqtt_create_options: mqtt::CreateOptions,
-    pub mqtt_connect_options: mqtt::ConnectOptions,
+    pub mqtt_create_options: paho::CreateOptions,
+    pub mqtt_connect_options: paho::ConnectOptions,
     pub msg_buffer_limit: usize,
     pub subscriptions: topic::Subscriptions,
 }
@@ -60,15 +60,15 @@ impl Default for MqttClientConfig {
 }
 
 pub struct MqttClient {
-    mqtt_client: mqtt::AsyncClient,
-    mqtt_subscription_stream: mqtt::AsyncReceiver<Option<mqtt::Message>>,
-    mqtt_connect_opt: mqtt::ConnectOptions,
+    mqtt_client: paho::AsyncClient,
+    mqtt_subscription_stream: paho::AsyncReceiver<Option<paho::Message>>,
+    mqtt_connect_opt: paho::ConnectOptions,
     mqtt_subscriptions: topic::Subscriptions,
 }
 
 impl MqttClient {
     pub async fn start(config: MqttClientConfig) -> Self {
-        let mut mqtt_client = match mqtt::AsyncClient::new(config.mqtt_create_options) {
+        let mut mqtt_client = match paho::AsyncClient::new(config.mqtt_create_options) {
             Ok(c) => c,
             Err(e) => {
                 log::error!("MqttClient start error: {}", e);
@@ -88,7 +88,7 @@ impl MqttClient {
         out
     }
 
-    pub async fn poll(&mut self) -> Option<mqtt::Message> {
+    pub async fn poll(&mut self) -> Option<paho::Message> {
         if !self.mqtt_client.is_connected() {
             self.reconnect().await;
         }
@@ -96,7 +96,7 @@ impl MqttClient {
         self.mqtt_subscription_stream.next().await?
     }
 
-    pub fn publish(&self, msg: mqtt::Message) -> mqtt::DeliveryToken {
+    pub fn publish(&self, msg: paho::Message) -> paho::DeliveryToken {
         self.mqtt_client.publish(msg)
     }
 
@@ -155,7 +155,7 @@ impl MqttClient {
         // while self.mqtt_client.is_connected() {}
 
         loop {
-            // Does not work on paho.mqtt.rust v0.12.3
+            // Does not work on paho.paho.rust v0.12.3
             if subscription.try_wait().is_none() {
                 if !self.mqtt_client.is_connected() {
                     self.reconnect().await;
@@ -171,7 +171,7 @@ impl MqttClient {
 
 #[cfg(test)]
 mod test {
-    use mqtt::MQTT_VERSION_5;
+    use paho::MQTT_VERSION_5;
     use serde_json::json;
 
     use super::*;
@@ -186,30 +186,30 @@ mod test {
 
         let configs = MqttClientConfig {
             mqtt_create_options: {
-                mqtt::CreateOptionsBuilder::new()
-                    .server_uri("mqtt://test.mosquitto.org:1883")
+                paho::CreateOptionsBuilder::new()
+                    .server_uri("paho://test.mosquitto.org:1883")
                     .client_id("saltyfishie_1")
                     .finalize()
             },
 
             mqtt_connect_options: {
-                let lwt = mqtt::Message::new(
+                let lwt = paho::Message::new(
                     "saltyfishie/echo/lwt",
                     "[LWT] Async subscriber v5 lost connection",
-                    mqtt::QOS_1,
+                    paho::QOS_1,
                 );
 
-                mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
+                paho::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
                     .keep_alive_interval(Duration::from_millis(5000))
                     .clean_start(false)
-                    .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => 0xFFFFFFFF as u32])
+                    .properties(paho::properties![paho::PropertyCode::SessionExpiryInterval => 0xFFFFFFFF as u32])
                     .will_message(lwt)
                     .finalize()
             },
 
             subscriptions: {
                 let mut s = topic::Subscriptions::new(None);
-                s.add("saltyfishe", mqtt::QOS_1, Default::default());
+                s.add("saltyfishe", paho::QOS_1, Default::default());
                 s.finalize()
             },
 
@@ -245,7 +245,7 @@ mod test {
                             "timestamp": chrono::Utc::now().to_string()
                         });
 
-                        client.publish(mqtt::Message::new(
+                        client.publish(paho::Message::new(
                             "saltyfishie/echo",
                             serde_json::to_string_pretty(&out).unwrap(),
                             1,
@@ -260,7 +260,7 @@ mod test {
     fn building_subscriptions() {
         let subs = {
             let mut s = topic::Subscriptions::new(None);
-            s.add("topic", 1, mqtt::SubscribeOptions::default());
+            s.add("topic", 1, paho::SubscribeOptions::default());
             s.finalize()
         };
 
